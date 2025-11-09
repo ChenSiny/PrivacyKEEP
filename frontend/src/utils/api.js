@@ -78,17 +78,39 @@ export async function requestRing(anonymousId, publicKey, userLevel = 'medium') 
  * @param {string} signature - 环签名
  * @returns {Promise} API响应
  */
-export async function submitScore(ringId, totalDistance, averagePace, signature) {
+export async function submitScore(groupName, totalDistance, averagePace, groupSignature) {
     try {
         const response = await apiClient.post('/api/leaderboard/submit-score', {
-            ring_id: ringId,
+            group_name: groupName,
             total_distance: totalDistance,
             average_pace: averagePace,
-            signature: signature
+            group_signature: groupSignature
         });
         return response.data;
     } catch (error) {
         console.error('成绩提交失败:', error);
+        throw error;
+    }
+}
+
+/**
+ * 提交真正环签名成绩
+ * @param {string} ringId
+ * @param {number} totalDistance
+ * @param {number} averagePace
+ * @param {{c0:string,s:string[]}} signature
+ */
+export async function submitScoreRing(ringId, totalDistance, averagePace, signature) {
+    try {
+        const response = await apiClient.post('/api/leaderboard/submit-score-ring', {
+            ring_id: ringId,
+            total_distance: totalDistance,
+            average_pace: averagePace,
+            signature
+        });
+        return response.data;
+    } catch (error) {
+        console.error('环签名成绩提交失败:', error);
         throw error;
     }
 }

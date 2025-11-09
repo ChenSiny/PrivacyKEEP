@@ -67,3 +67,15 @@ class GroupScore(Base):
     signature = Column(Text, nullable=False, comment="环签名，用于验证成绩真实性")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), 
                        comment="成绩提交时间")
+
+class Group(Base):
+    """
+    运动群组与群密钥（对称密钥，用于成员上传成绩时的 HMAC 验证）。
+    注意：群密钥仅用于教学演示；生产建议采用真实环签名或群签名方案。
+    """
+    __tablename__ = "groups"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), unique=True, index=True, nullable=False)
+    secret = Column(Text, nullable=False, comment="群密钥（hex 编码）")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

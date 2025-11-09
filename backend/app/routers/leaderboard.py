@@ -3,11 +3,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.database import get_db
-from app.schemas import RingRequest, RingResponse, ScoreSubmit, LeaderboardResponse
+from app.schemas import RingRequest, RingResponse, ScoreSubmit, LeaderboardResponse, ScoreSubmitRing
 from app.services.ring_service import RingService
 from app.services.crypto_service import CryptoService
-from app.models import Ring, GroupScore, User
+from app.models import Ring, GroupScore, User, Group
 from sqlalchemy import func
+import json
 
 # 创建排行榜相关的API路由
 router = APIRouter()
@@ -104,31 +105,28 @@ async def submit_score(
     score_data: ScoreSubmit,
     db: Session = Depends(get_db)
 ):
-    """提交带有环签名的运动成绩。"""
+    """提交带有群密钥 HMAC 的运动成绩（教学版）。"""
     try:
-        ring = RingService.get_ring_by_id(db, score_data.ring_id)
-        if not ring:
-            raise HTTPException(status_code=404, detail="环不存在")
+        grp = db.query(Group).filter(Group.name==score_data.group_name).first()
+        if not grp:
+            raise HTTPException(status_code=404, detail="群组不存在")
 
-        message = f"{score_data.ring_id}{score_data.total_distance}{score_data.average_pace}"
-        is_valid = CryptoService.verify_ring_signature(
-            message,
-            score_data.signature,
-            ring.public_keys
-        )
+        # 验证 HMAC（基于 group_key 的 SHA-512 HMAC）
+        import hmac, hashlib
+        msg = f"{score_data.group_name}|{score_data.total_distance}|{score_data.average_pace}".encode()
+        key = bytes.fromhex(grp.secret)
+        mac = hmac.new(key, msg, hashlib.sha512).hexdigest()
+        if mac != score_data.group_signature:
+            raise HTTPException(status_code=400, detail="群密钥验证失败")
 
-        if not is_valid:
-            raise HTTPException(status_code=400, detail="环签名验证失败")
-
-        # 找到提交者（通过环里的第一个公钥或匹配匿名ID，如果需要可扩展）这里只简单不做强验证
-        user = db.query(User).filter(User.public_key.in_(ring.public_keys)).first()
+        # 将成绩聚合进对应群组
         group_score = GroupScore(
-            ring_id=score_data.ring_id,
-            group_name=ring.group_name,
-            user_anonymous_id=user.anonymous_id if user else None,
+            ring_id=f"group_{grp.id}",
+            group_name=score_data.group_name,
+            user_anonymous_id=None,
             total_distance=score_data.total_distance,
             average_pace=score_data.average_pace,
-            signature=score_data.signature
+            signature=score_data.group_signature
         )
         db.add(group_score)
         db.commit()
@@ -136,13 +134,50 @@ async def submit_score(
         return {
             "message": "成绩上传成功",
             "status": "success",
-            "description": "成绩已通过环签名验证并匿名存储"
+            "description": "成绩已通过群密钥验证并匿名存储"
         }
     except HTTPException:
         raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"成绩提交失败: {str(e)}")
+
+@router.post("/submit-score-ring", response_model=dict)
+async def submit_score_ring(
+    payload: ScoreSubmitRing,
+    db: Session = Depends(get_db)
+):
+    """使用真正环签名提交成绩 (Schnorr-like 教学版)。"""
+    try:
+        # 获取环信息
+        ring = db.query(Ring).filter(Ring.ring_id == payload.ring_id).first()
+        if not ring:
+            raise HTTPException(status_code=404, detail="环不存在")
+        # 组装消息（与前端保持一致）
+        msg = f"{payload.ring_id}|{payload.total_distance}|{payload.average_pace}".encode()
+        c0 = payload.signature.c0
+        s_list = payload.signature.s
+        # 验证环签名
+        if not CryptoService.ring_verify(msg, ring.public_keys, c0, s_list):
+            raise HTTPException(status_code=400, detail="环签名验证失败")
+        # 写入成绩；签名序列化保留
+        sig_store = json.dumps({"c0": c0, "s": s_list})
+        gs = GroupScore(
+            ring_id=ring.ring_id,
+            group_name=ring.group_name,
+            user_anonymous_id=None,
+            total_distance=payload.total_distance,
+            average_pace=payload.average_pace,
+            signature=sig_store
+        )
+        db.add(gs)
+        db.commit()
+        return {"message": "环签名成绩上传成功", "status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"环签名成绩提交失败: {str(e)}")
 
 @router.get("/", response_model=LeaderboardResponse)
 async def get_leaderboard(db: Session = Depends(get_db), seed: bool = True):

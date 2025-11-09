@@ -39,10 +39,22 @@ class RingResponse(BaseModel):
 # 排行榜相关模型
 class ScoreSubmit(BaseModel):
     """成绩提交模型"""
+    total_distance: float
+    average_pace: float
+    group_name: str
+    group_signature: str
+
+class RingSignature(BaseModel):
+    """真正环签名（Schnorr 风格）"""
+    c0: str                 # 32字节 hex（挑战初值）
+    s: List[str]            # 每个环成员对应的 32字节 hex 标量数组（长度等于环大小）
+
+class ScoreSubmitRing(BaseModel):
+    """使用真正环签名提交成绩"""
     ring_id: str
     total_distance: float
     average_pace: float
-    signature: str
+    signature: RingSignature
 
 class GroupScoreResponse(BaseModel):
     """群体成绩响应模型"""
@@ -69,3 +81,4 @@ class UserLoginResponse(BaseModel):
     public_key: str
     user_level: str
     group_name: str
+    group_key: str

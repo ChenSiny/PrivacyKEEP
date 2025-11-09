@@ -111,8 +111,8 @@ import MapComponent from '../components/MapComponent.vue'
 import UserSettingsCard from '../components/UserSettingsCard.vue'
 import { calculateWorkoutStatsReal } from '../utils/gps.js'
 import { processTrajectoryWithDP } from '../utils/dp.js'
-import { generateKeyPair, simulateRingSignature, prepareSignatureMessage } from '../utils/crypto.js'
-import { uploadHeatmapData, getGlobalHeatmap, requestRing, submitScore, getLeaderboard, loginUser } from '../utils/api.js'
+import { generateKeyPair, ringSign, prepareSignatureMessage, generateGroupSignature } from '../utils/crypto.js'
+import { uploadHeatmapData, getGlobalHeatmap, requestRing, submitScore, submitScoreRing, getLeaderboard, loginUser } from '../utils/api.js'
 
 export default {
   name: 'DemoView',
@@ -149,7 +149,7 @@ export default {
       // 用户信息
       userKeyPair: null,
       currentAnonymousId: '',
-      currentRing: null,
+  currentRing: null,
       // 新增：用户等级单独保存，匿名ID也可编辑
       userLevel: 'medium',
   // 目标配速（分钟/公里），用于计算“虚拟用时”，保持演示数据合理
@@ -177,7 +177,7 @@ export default {
       try {
         this.currentAnonymousId = this.currentAnonymousId || ('user_' + Math.random().toString(36).slice(2,8));
         const login = await loginUser(this.currentAnonymousId, this.userKeyPair.publicKey, this.userLevel);
-        this.currentRing = { group_name: login.group_name };
+        this.currentRing = { group_name: login.group_name, group_key: login.group_key };
         this.loggedIn = true;
         this.$nextTick(() => {
           const center = this.personalTrajectory[0] || { lat: 39.9042, lng: 116.4074 };
@@ -283,33 +283,51 @@ export default {
         await uploadHeatmapData(this.currentAnonymousId, processedHeatmapData);
         this.processDetails.uploadInfo = '热力图数据上传成功';
         
-        // 3. 请求环并提交成绩
-        const ringInfo = await requestRing(
-          this.currentAnonymousId, 
-          this.userKeyPair.publicKey, 
-          this.userLevel
-        );
-        this.currentRing = ringInfo;
-        
-        // 4. 生成环签名并提交成绩
-        const signatureMessage = prepareSignatureMessage(
-          ringInfo.ring_id,
+        // 3. 请求环信息（若尚未获取）并生成真正环签名（当前前端为占位，后端会验证失败直到实现）
+        if (!this.currentRing?.ring_id) {
+          const ringInfo = await requestRing(
+            this.currentAnonymousId,
+            this.userKeyPair.publicKey,
+            this.userLevel
+          );
+          this.currentRing = { ...this.currentRing, ...ringInfo };
+        }
+        const ringMsg = prepareSignatureMessage(
+          this.currentRing.ring_id,
           this.workoutStats.totalDistance,
           this.workoutStats.averagePace
         );
-        
-        const ringSignature = await simulateRingSignature(
-          signatureMessage,
+        const ringSignature = await ringSign(
+          ringMsg,
           this.userKeyPair.privateKey,
-          ringInfo.ring_public_keys
+          this.currentRing.ring_public_keys || []
         );
-        
-        await submitScore(
-          ringInfo.ring_id,
-          this.workoutStats.totalDistance,
-          this.workoutStats.averagePace,
-          ringSignature
-        );
+        try {
+          await submitScoreRing(
+            this.currentRing.ring_id,
+            this.workoutStats.totalDistance,
+            this.workoutStats.averagePace,
+            ringSignature
+          );
+        } catch (e) {
+          console.warn('环签名提交失败，回退到群密钥HMAC流程', e);
+          // 回退：使用群密钥 HMAC
+          const grp = this.currentRing;
+          if (grp?.group_key && grp?.group_name) {
+            const groupSignature = await generateGroupSignature(
+              grp.group_key,
+              grp.group_name,
+              this.workoutStats.totalDistance,
+              this.workoutStats.averagePace
+            );
+            await submitScore(
+              grp.group_name,
+              this.workoutStats.totalDistance,
+              this.workoutStats.averagePace,
+              groupSignature
+            );
+          }
+        }
         
         // 5. 更新全局数据
         await this.loadGlobalHeatmap();
@@ -322,9 +340,9 @@ export default {
         // 显示成功消息
         this.$emit('show-message', {
           type: 'success',
-          text: `运动数据上传成功！您已加入 ${ringInfo.group_name}`
+          text: `运动数据上传成功！您已加入 ${grp.group_name}`
         });
-        this._showToast('success', `运动数据上传成功！您已加入 ${ringInfo.group_name}`);
+        this._showToast('success', `运动数据上传成功！您已加入 ${grp.group_name}`);
         
       } catch (error) {
         console.error('运动数据处理失败:', error);

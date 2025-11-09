@@ -186,7 +186,37 @@ export default {
       });
 
       if (latlngs.length >= 2) {
-        try { this.map.fitBounds(this.polyline.getBounds(), { padding: [20,20] }); } catch (e) { /* ignore */ }
+        try {
+          const bounds = this.polyline.getBounds();
+          // 刚开始录制时避免过渡缩放，保持登录/开始时的网格窗口
+          const EARLY_POINTS = 10;
+          if (this.isRecording && latlngs.length <= EARLY_POINTS) {
+            // 不进行任何 fit 操作，直接保持现有视图
+            return;
+          }
+          // 其余情况：fit，但保证可视网格数不小于3，且不使用动画
+          const center = bounds.getCenter();
+          const sw = bounds.getSouthWest();
+          const ne = bounds.getNorthEast();
+          const latRange = Math.max(1e-9, ne.lat - sw.lat);
+          const lngRange = Math.max(1e-9, ne.lng - sw.lng);
+          const minCells = 3;
+          const cell = this.gridSizeDeg;
+          let targetSouth = sw.lat, targetNorth = ne.lat, targetWest = sw.lng, targetEast = ne.lng;
+          // 纵向不足3格则扩展
+          if (latRange / cell < minCells) {
+            const need = minCells * cell;
+            targetSouth = center.lat - need/2;
+            targetNorth = center.lat + need/2;
+          }
+          // 横向不足3格则扩展
+          if (lngRange / cell < minCells) {
+            const need = minCells * cell;
+            targetWest = center.lng - need/2;
+            targetEast = center.lng + need/2;
+          }
+          this.map.fitBounds([[targetSouth, targetWest],[targetNorth, targetEast]], { padding: [20,20], animate: false });
+        } catch (e) { /* ignore */ }
       }
     },
 
@@ -298,7 +328,8 @@ export default {
     // 使地图缩放到以某中心为基准的 10x10 网格范围
     fitToGridWindow(center=null, cells=10) {
       if (!this.map) return;
-      const half = Math.floor(cells/2);
+      const minCells = Math.max(3, Number(cells) || 10);
+      const half = Math.floor(minCells/2);
       const c = center || this.map.getCenter();
       const latCell = this.gridSizeDeg;
       const lngCell = this.gridSizeDeg / Math.max(0.0001, Math.cos(c.lat * Math.PI/180));
@@ -307,7 +338,7 @@ export default {
       const west = c.lng - half * lngCell;
       const east = c.lng + half * lngCell;
       try {
-        this.map.fitBounds([[south, west], [north, east]], { padding: [20,20] });
+        this.map.fitBounds([[south, west], [north, east]], { padding: [20,20], animate: false });
       } catch(_) {}
     }
   },
