@@ -57,3 +57,15 @@ class GroupScoreResponse(BaseModel):
 class LeaderboardResponse(BaseModel):
     """排行榜响应模型"""
     leaderboard: List[GroupScoreResponse]
+
+# 用户登录相关模型
+class UserLoginRequest(BaseModel):
+    anonymous_id: str
+    public_key: str
+    user_level: str = "medium"
+
+class UserLoginResponse(BaseModel):
+    anonymous_id: str
+    public_key: str
+    user_level: str
+    group_name: str

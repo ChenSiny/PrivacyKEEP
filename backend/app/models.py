@@ -13,6 +13,7 @@ class User(Base):
     anonymous_id = Column(String(100), unique=True, index=True, nullable=False, 
                          comment="用户匿名标识，用于关联数据但不暴露真实身份")
     public_key = Column(Text, nullable=False, comment="用户的椭圆曲线公钥")
+    group_name = Column(String(100), nullable=True, comment="用户所属的固定群组名称（登录时分配，一次性）")
     user_level = Column(String(50), default="medium", comment="用户运动水平，用于环匹配")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), 
                        comment="用户注册时间")
@@ -59,6 +60,8 @@ class GroupScore(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     ring_id = Column(String(100), nullable=False, comment="所属环的ID")
+    group_name = Column(String(100), nullable=True, comment="群组名称冗余存储便于统计")
+    user_anonymous_id = Column(String(100), nullable=True, comment="提交者匿名ID，用于统计成员数")
     total_distance = Column(Float, nullable=False, comment="运动总距离（公里）")
     average_pace = Column(Float, nullable=False, comment="平均配速（分钟/公里）")
     signature = Column(Text, nullable=False, comment="环签名，用于验证成绩真实性")

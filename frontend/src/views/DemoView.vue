@@ -1,5 +1,12 @@
+      
 <template>
   <div class="demo-view">
+    <transition name="toast-fade">
+      <div v-if="lastMessage" :class="['toast', lastMessage.type]">
+        {{ lastMessage.text }}
+        <button class="toast-close" @click="lastMessage=null">×</button>
+      </div>
+    </transition>
     <!-- 顶部状态区：隐私状态 + 用户设置 并列展示 -->
     <div class="status-row">
       <PrivacyStatus 
@@ -10,8 +17,11 @@
       <UserSettingsCard 
         :anonymous-id="currentAnonymousId"
         :user-level="userLevel"
+        :group-name="currentRing?.group_name || ''"
         @update:anonymousId="val => currentAnonymousId = val"
         @update:userLevel="val => userLevel = val"
+        @assign-group="handleAssignGroup"
+        @login="handleLogin"
         class="status-item"
       />
     </div>
@@ -36,53 +46,53 @@
         />
       </div>
       
-      <!-- 右侧：主内容区 -->
+      <!-- 右侧：主内容区（地图始终存在，排行榜浮层切换） -->
       <div class="right-panel">
-        <!-- 地图视图 -->
-        <div v-if="currentView !== 'leaderboard'" class="map-view">
-          <MapComponent 
+        <div class="map-view">
+          <MapComponent
             :current-view="currentView"
             :personal-trajectory="personalTrajectory"
             :heatmap-data="globalHeatmapData"
             :is-recording="isRecording"
+            :show-placeholder="!loggedIn && !dataUploaded"
+            ref="mapRef"
           />
-        </div>
-        
-        <!-- 排行榜视图 -->
-        <div v-else class="leaderboard-view">
-          <div class="leaderboard-container">
-            <h2>👥 群体排行榜</h2>
-            <p class="leaderboard-description">
-              基于环签名技术的匿名群体竞争 - 保护个人隐私的同时享受竞技乐趣
-            </p>
-            
-            <div v-if="leaderboardData.length === 0" class="empty-state">
-              <div class="empty-icon">📊</div>
-              <p>暂无排行榜数据</p>
-              <p class="empty-hint">完成一次运动后即可查看群体排名</p>
-            </div>
-            
-            <div v-else class="leaderboard-list">
-              <div v-for="(group, index) in leaderboardData" 
-                   :key="group.group_name"
-                   :class="['leaderboard-item', { podium: index < 3 }]">
-                <div class="rank">
-                  <span v-if="index < 3" class="podium-icon">
-                    {{ ['🥇', '🥈', '🥉'][index] }}
-                  </span>
-                  <span v-else class="rank-number">#{{ index + 1 }}</span>
-                </div>
-                <div class="group-info">
-                  <div class="group-name">{{ group.group_name }}</div>
-                  <div class="group-stats">
-                    <span class="stat">{{ group.average_distance }} km</span>
-                    <span class="stat">{{ group.average_pace }} min/km</span>
-                    <span class="stat">{{ group.member_count }} 人</span>
+          <div v-if="currentView==='leaderboard'" class="leaderboard-inline">
+            <div class="leaderboard-container">
+              <h2>👥 群体排行榜</h2>
+              <p class="leaderboard-description">
+                基于环签名技术的匿名群体竞争 - 保护个人隐私的同时享受竞技乐趣
+              </p>
+
+              <div v-if="leaderboardData.length === 0" class="empty-state">
+                <div class="empty-icon">📊</div>
+                <p>暂无排行榜数据</p>
+                <p class="empty-hint">完成一次运动后即可查看群体排名</p>
+              </div>
+
+              <div v-else class="leaderboard-list">
+                <div v-for="(group, index) in leaderboardData"
+                    :key="group.group_name"
+                    :class="['leaderboard-item', { podium: index < 3 }]">
+
+                  <div class="rank">
+                    <span v-if="index < 3" class="podium-icon">
+                      {{ ['🥇', '🥈', '🥉'][index] }}
+                    </span>
+                    <span v-else class="rank-number">#{{ index + 1 }}</span>
                   </div>
-                </div>
-                <div class="group-score">
-                  <div class="score-value">{{ group.average_distance }}</div>
-                  <div class="score-label">平均距离</div>
+                  <div class="group-info">
+                    <div class="group-name">{{ group.group_name }}</div>
+                    <div class="group-stats">
+                      <span class="stat">{{ format2(group.average_distance) }} km</span>
+                      <span class="stat">{{ format2(group.average_pace) }} min/km</span>
+                      <span class="stat">{{ group.member_count }} 人</span>
+                    </div>
+                  </div>
+                  <div class="group-score">
+                    <div class="score-value">{{ format2(group.average_distance) }}</div>
+                    <div class="score-label">平均距离</div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -102,7 +112,7 @@ import UserSettingsCard from '../components/UserSettingsCard.vue'
 import { calculateWorkoutStatsReal } from '../utils/gps.js'
 import { processTrajectoryWithDP } from '../utils/dp.js'
 import { generateKeyPair, simulateRingSignature, prepareSignatureMessage } from '../utils/crypto.js'
-import { uploadHeatmapData, getGlobalHeatmap, requestRing, submitScore, getLeaderboard } from '../utils/api.js'
+import { uploadHeatmapData, getGlobalHeatmap, requestRing, submitScore, getLeaderboard, loginUser } from '../utils/api.js'
 
 export default {
   name: 'DemoView',
@@ -149,20 +159,47 @@ export default {
       
       // 模拟运动计时器
       workoutTimer: null,
-      workoutStartTime: null
+      workoutStartTime: null,
+      loggedIn: false
+      ,
+      lastMessage: null
+      ,currentHeading: null
     }
   },
   async mounted() {
-    // 初始化用户密钥对
     this.userKeyPair = generateKeyPair();
-    
-    // 加载全局热力图数据
+    await this.handleLogin();
     await this.loadGlobalHeatmap();
-    
-    // 加载排行榜数据
     await this.loadLeaderboard();
   },
   methods: {
+    async handleLogin() {
+      try {
+        this.currentAnonymousId = this.currentAnonymousId || ('user_' + Math.random().toString(36).slice(2,8));
+        const login = await loginUser(this.currentAnonymousId, this.userKeyPair.publicKey, this.userLevel);
+        this.currentRing = { group_name: login.group_name };
+        this.loggedIn = true;
+        this.$nextTick(() => {
+          const center = this.personalTrajectory[0] || { lat: 39.9042, lng: 116.4074 };
+          if (this.$refs.mapRef && this.$refs.mapRef.fitToGridWindow) {
+            this.$refs.mapRef.fitToGridWindow(center, 10);
+          }
+        });
+        this._showToast('success', `登录成功，已分配至 ${login.group_name}`);
+      } catch (e) {
+        console.warn('登录失败', e);
+        this._showToast('error', '登录失败，请重试');
+      }
+    },
+    async handleAssignGroup() {
+      // 简单调用请求环以确保分配队伍（若已有则忽略）
+      if (this.currentRing && this.currentRing.group_name) return;
+      try {
+        const ringInfo = await requestRing(this.currentAnonymousId, this.userKeyPair.publicKey, this.userLevel);
+        this.currentRing = ringInfo;
+        this._showToast('success', `已加入群组 ${ringInfo.group_name}`);
+      } catch(e) { console.warn('群组分配失败', e); }
+    },
     async handleStartWorkout(settings) {
       console.log('开始运动:', settings);
       
@@ -170,8 +207,7 @@ export default {
       this.dataUploaded = false;
       this.processState = 'recording';
       // 若用户在顶部卡片编辑了匿名ID，则优先用顶部值；否则使用控制面板传来的；再兜底生成一个
-      this.currentAnonymousId = this.currentAnonymousId || settings.anonymousId || ('user_' + Math.random().toString(36).slice(2,8));
-      this.userLevel = (settings && settings.userLevel) || this.userLevel;
+  this.currentAnonymousId = this.currentAnonymousId || ('user_' + Math.random().toString(36).slice(2,8));
       this.currentView = 'trajectory';
       
       // 清空之前的轨迹
@@ -180,25 +216,43 @@ export default {
   this.virtualElapsedSeconds = 0;
       
       // 开始“按真实时间流速”的模拟运动（1Hz，每秒前进5-8米）
-      this.startWorkoutSimulationRealtime();
+      this.startRandomWalkRealtime();
     },
     
-    startWorkoutSimulationRealtime() {
+    startRandomWalkRealtime() {
       this.workoutStartTime = Date.now();
       const center = { lat: 39.9042, lng: 116.4074 };
       if (this.personalTrajectory.length === 0) this.personalTrajectory.push(center);
-
-      let headingDeg = 45; // 初始朝向
-      const vary = () => (Math.random() - 0.5) * 10; // 每秒微调朝向 ±5°
-
+      // 以起点为中心缩放到 10x10 视窗
+      this.$nextTick(() => {
+        if (this.$refs.mapRef && this.$refs.mapRef.fitToGridWindow) {
+          this.$refs.mapRef.fitToGridWindow(center, 10);
+        }
+      });
+      // 初始化方向（度）并限制后续转向幅度
+      if (this.currentHeading == null) this.currentHeading = Math.random()*360;
+      const TURN_MAX = 30; // 最大转向幅度（度）
+      const MAX_RADIUS_METERS = 1500; // 距离起点最大半径，超出则缓慢向中心偏转
       const tick = () => {
         if (!this.isRecording) return;
         const last = this.personalTrajectory[this.personalTrajectory.length - 1];
-        // 每秒速度 5-8 米
-        const meters = 5 + Math.random() * 3;
-        headingDeg = (headingDeg + vary()) % 360;
-        const next = this._moveMeters(last, meters, headingDeg);
-        // 安全检查
+        // 平滑方向：在当前 heading 基础上小幅调整
+        let delta = (Math.random()*2 - 1) * TURN_MAX; // -TURN_MAX..TURN_MAX
+        this.currentHeading = (this.currentHeading + delta + 360) % 360;
+        const meters = 5 + Math.random() * 3; // 步长
+        // 越界纠偏：计算与起点距离，若超半径则朝起点方向微调
+        const start = this.personalTrajectory[0];
+        const distFromStart = this._haversineMeters(start, last);
+        if (distFromStart > MAX_RADIUS_METERS) {
+          // 方向指向起点
+          const dx = start.lng - last.lng;
+            const dy = start.lat - last.lat;
+          const angleToStart = (Math.atan2(dy, dx)*180/Math.PI + 360)%360;
+          // 将当前 heading 往 angleToStart 靠近
+          const diff = ((angleToStart - this.currentHeading + 540)%360)-180;
+          this.currentHeading = (this.currentHeading + diff*0.2 + 360)%360; // 只纠偏 20%
+        }
+        const next = this._moveMeters(last, meters, this.currentHeading);
         if (Number.isFinite(next.lat) && Number.isFinite(next.lng)) {
           this.personalTrajectory.push(next);
         }
@@ -206,7 +260,6 @@ export default {
         this.workoutStats = calculateWorkoutStatsReal(this.personalTrajectory, elapsed);
         this.workoutTimer = setTimeout(tick, 1000);
       };
-
       tick();
     },
     
@@ -234,7 +287,7 @@ export default {
         const ringInfo = await requestRing(
           this.currentAnonymousId, 
           this.userKeyPair.publicKey, 
-          'medium'
+          this.userLevel
         );
         this.currentRing = ringInfo;
         
@@ -271,6 +324,7 @@ export default {
           type: 'success',
           text: `运动数据上传成功！您已加入 ${ringInfo.group_name}`
         });
+        this._showToast('success', `运动数据上传成功！您已加入 ${ringInfo.group_name}`);
         
       } catch (error) {
         console.error('运动数据处理失败:', error);
@@ -280,6 +334,7 @@ export default {
           type: 'error',
           text: '数据处理失败，请重试'
         });
+        this._showToast('error', '数据处理失败，请重试');
       }
     },
     
@@ -307,9 +362,19 @@ export default {
       this.loadGlobalHeatmap();
       this.loadLeaderboard();
     },
+    _showToast(type, text) {
+      this.lastMessage = { type, text };
+      clearTimeout(this._toastTimer);
+      this._toastTimer = setTimeout(() => { this.lastMessage = null; }, 4000);
+    },
     
     handleSwitchView(view) {
       this.currentView = view;
+    },
+    format2(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return '0.00';
+      return n.toFixed(2);
     },
     
     async loadGlobalHeatmap() {
@@ -400,15 +465,23 @@ export default {
   border-radius: 10px;
   overflow: hidden;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  position: relative; /* 让内部面板可相对定位 */
 }
 
-.leaderboard-view {
-  flex: 1;
-  background: white;
-  border-radius: 10px;
-  padding: 2rem;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+.leaderboard-view { display: none; }
+.leaderboard-inline {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 42%;
+  min-width: 300px;
+  max-width: 520px;
+  background: rgba(255,255,255,0.96);
+  box-shadow: -6px 0 12px rgba(0,0,0,0.08);
+  border-left: 1px solid #f0f0f0;
   overflow-y: auto;
+  padding: 1rem 1.25rem;
 }
 
 .leaderboard-container h2 {

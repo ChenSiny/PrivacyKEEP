@@ -24,6 +24,7 @@ export default {
     personalTrajectory: { type: Array, default: () => [] },
     heatmapData: { type: Array, default: () => [] },
     isRecording: { type: Boolean, default: false },
+    showPlaceholder: { type: Boolean, default: false },
 
     // 新增配置项
     showTiles: { type: Boolean, default: false },        // 是否加载真实瓦片（演示时可设 false）
@@ -49,6 +50,12 @@ export default {
   },
   mounted() {
     this.initMap();
+    // 初始若需要占位网格，则自动缩放到 10x10 视窗
+    if (this.showPlaceholder) {
+      const c = this.estimateCenter() || [this.gridOrigin.lat, this.gridOrigin.lng];
+      const center = { lat: Array.isArray(c) ? c[0] : c.lat, lng: Array.isArray(c) ? c[1] : c.lng };
+      this.$nextTick(() => this.fitToGridWindow(center, 10));
+    }
   },
   beforeUnmount() {
     // 必须销毁地图以释放 DOM 事件和内存
@@ -119,14 +126,17 @@ export default {
     },
 
     renderForView(view) {
-      // 切换视图时选择性渲染
-      this.clearTrajectory();
+      // 我们希望无论是否在轨迹视图都保持热力图背景
       this.clearHeatmap();
+      this.drawHeatmap(this.heatmapData);
 
-      if (view === 'trajectory') {
+      // 只有在轨迹视图或正在录制时才渲染轨迹层
+      if (view === 'trajectory' || this.isRecording) {
+        this.clearTrajectory();
         this.drawPersonalTrajectory(this.personalTrajectory);
-      } else if (view === 'heatmap') {
-        this.drawHeatmap(this.heatmapData);
+      } else {
+        // 非轨迹视图且未录制时隐藏轨迹层内容
+        this.clearTrajectory();
       }
     },
 
@@ -142,6 +152,7 @@ export default {
     },
 
     clearHeatmap() {
+      // 不销毁图层，只清空其内部对象
       if (this.heatmapLayer) this.heatmapLayer.clearLayers();
     },
 
@@ -181,16 +192,59 @@ export default {
 
     drawHeatmap(heatmapData) {
       if (!this.map || !heatmapData) return;
+      // 强制占位：显示初始 10x10 方格（不依赖后端返回）
+      if (this.showPlaceholder) {
+        // 以起点或 gridOrigin 为中心生成 10x10 占位，严格对齐网格，避免偏移重叠
+        const anchor = this.personalTrajectory && this.personalTrajectory.length ? this._normalizePoint(this.personalTrajectory[0]) : { lat: this.gridOrigin.lat, lng: this.gridOrigin.lng };
+        const centerX = Math.floor(anchor.lng / this.gridSizeDeg);
+        const centerY = Math.floor(anchor.lat / this.gridSizeDeg);
+        const size = 10; const half = Math.floor(size/2);
+        const placeholder = [];
+        for (let dx=-half; dx<half; dx++) {
+          for (let dy=-half; dy<half; dy++) {
+            const x = centerX + dx;
+            const y = centerY + dy;
+            const lat = y * this.gridSizeDeg;
+            const lng = x * this.gridSizeDeg;
+            const dist = Math.abs(dx) + Math.abs(dy);
+            const weight = Math.max(1, 10 - dist); // 中心更热
+            placeholder.push({ lat, lng, weight });
+          }
+        }
+        heatmapData = placeholder;
+      } else if (!heatmapData.length) {
+        // 无数据但未强制占位：保持空
+        return;
+      }
+      // 限制真实数据到起点中心 10x10（若已有起点），保证初始视图一致
+      if (!this.showPlaceholder && this.personalTrajectory.length) {
+        const anchor = this._normalizePoint(this.personalTrajectory[0]);
+        const centerX = Math.floor(anchor.lng / this.gridSizeDeg);
+        const centerY = Math.floor(anchor.lat / this.gridSizeDeg);
+        const size = 10; const half = Math.floor(size/2);
+        heatmapData = heatmapData.filter(cell => {
+          const cx = cell.x != null ? Number(cell.x) : Math.floor(cell.lng / this.gridSizeDeg);
+          const cy = cell.y != null ? Number(cell.y) : Math.floor(cell.lat / this.gridSizeDeg);
+          return (cx >= centerX - half && cx < centerX + half && cy >= centerY - half && cy < centerY + half);
+        });
+      }
       // heatmapData 可支持两种格式：
       // 1) { lat, lng, weight }
       // 2) { x, y, weight } 其中 x/y 为格编号，映射到 gridOrigin + x*gridSizeDeg
+      // 调整经度增量以在像素上更接近正方：lngDelta = gridSizeDeg / cos(lat)
+      // 使用一致的经纬度增量，避免横向放大导致重叠
+      const latDelta = this.gridSizeDeg;
+      const lngDelta = this.gridSizeDeg;
       for (const item of heatmapData) {
         let lat, lng;
         if (item.lat != null && item.lng != null) {
+          // 已经是地理坐标
           lat = Number(item.lat); lng = Number(item.lng);
         } else if (item.y != null && item.x != null) {
-          lat = this.gridOrigin.lat + (Number(item.y) * this.gridSizeDeg);
-          lng = this.gridOrigin.lng + (Number(item.x) * this.gridSizeDeg);
+          const baseLatIndex = Math.floor(this.gridOrigin.lat / this.gridSizeDeg);
+          const baseLngIndex = Math.floor(this.gridOrigin.lng / this.gridSizeDeg);
+          lat = this.gridOrigin.lat + (Number(item.y) - baseLatIndex) * this.gridSizeDeg;
+          lng = this.gridOrigin.lng + (Number(item.x) - baseLngIndex) * this.gridSizeDeg;
         } else {
           continue;
         }
@@ -199,12 +253,23 @@ export default {
         const opacity = 0.3 + (intensity * 0.5);
         const bounds = [
           [lat, lng],
-          [lat + this.gridSizeDeg, lng + this.gridSizeDeg]
+          [lat + latDelta, lng + lngDelta]
         ];
+        // 最小像素尺寸保护：避免过度缩放导致单元格 < 2px
+        const p1 = this.map.latLngToLayerPoint(bounds[0]);
+        const p2 = this.map.latLngToLayerPoint(bounds[1]);
+        if (Math.abs(p2.x - p1.x) < 2 || Math.abs(p2.y - p1.y) < 2) {
+          continue; // 跳过过小的格子
+        }
         L.rectangle(bounds, {
           color, fillColor: color, fillOpacity: opacity, weight: 1
         }).addTo(this.heatmapLayer);
       }
+    },
+
+    refreshAllLayers() {
+      // 提供给父组件在外部强制刷新：保持热力图 + 轨迹叠加
+      this.renderForView(this.currentView);
     },
 
     getColorForIntensity(intensity) {
@@ -228,18 +293,35 @@ export default {
           iconAnchor: [12, 12]
         })
       }).addTo(this.map);
+    },
+
+    // 使地图缩放到以某中心为基准的 10x10 网格范围
+    fitToGridWindow(center=null, cells=10) {
+      if (!this.map) return;
+      const half = Math.floor(cells/2);
+      const c = center || this.map.getCenter();
+      const latCell = this.gridSizeDeg;
+      const lngCell = this.gridSizeDeg / Math.max(0.0001, Math.cos(c.lat * Math.PI/180));
+      const south = c.lat - half * latCell;
+      const north = c.lat + half * latCell;
+      const west = c.lng - half * lngCell;
+      const east = c.lng + half * lngCell;
+      try {
+        this.map.fitBounds([[south, west], [north, east]], { padding: [20,20] });
+      } catch(_) {}
     }
   },
   watch: {
     personalTrajectory: {
-      handler() { if (this.currentView === 'trajectory') this.scheduleRedraw('trajectory'); },
+      handler() { this.scheduleRedraw(this.currentView); },
       deep: true
     },
     heatmapData: {
-      handler() { if (this.currentView === 'heatmap') this.scheduleRedraw('heatmap'); },
+      handler() { this.scheduleRedraw(this.currentView); },
       deep: true
     },
-    currentView(newView) { this.renderForView(newView); }
+    currentView(newView) { this.renderForView(newView); },
+    isRecording(val) { this.renderForView(this.currentView); }
   }
 }
 </script>

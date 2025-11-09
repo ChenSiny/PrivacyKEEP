@@ -27,35 +27,18 @@
     </div>
 
     <div class="panel-section">
-      <h3>🗺️ 轨迹模拟</h3>
-      <select v-model="selectedTrajectory" class="trajectory-select">
-        <option value="circle">环形轨迹</option>
-        <option value="line">直线轨迹</option>
-        <option value="random">随机轨迹</option>
-      </select>
+      
     </div>
 
     <div class="panel-section">
-      <h3> 数据视图</h3>
-      <div class="view-buttons">
-        <button 
-          @click="switchView('trajectory')"
-          :class="['view-btn', { active: currentView === 'trajectory' }]"
-        >
-          实时轨迹
-        </button>
-        <button 
-          @click="switchView('heatmap')"
-          :class="['view-btn', { active: currentView === 'heatmap' }]"
-        >
-          热力图
-        </button>
-        <button 
-          @click="switchView('leaderboard')"
-          :class="['view-btn', { active: currentView === 'leaderboard' }]"
-        >
-          排行榜
-        </button>
+      <h3>📊 视图切换</h3>
+      <div class="view-buttons merged">
+        <button
+          v-for="item in viewOptions"
+          :key="item.value"
+          @click="switchView(item.value)"
+          :class="['view-btn', { active: currentView === item.value }]"
+        >{{ item.label }}</button>
       </div>
     </div>
   </div>
@@ -76,14 +59,15 @@ export default {
   },
   data() {
     return {
-      selectedTrajectory: 'circle'
+      viewOptions: [
+        { value: 'trajectory', label: '轨迹' },
+        { value: 'leaderboard', label: '排行榜' }
+      ]
     };
   },
   methods: {
     startWorkout() {
-      this.$emit('start-workout', {
-        trajectoryType: this.selectedTrajectory
-      });
+      this.$emit('start-workout');
     },
     endWorkout() {
       this.$emit('end-workout');

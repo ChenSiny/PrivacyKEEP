@@ -106,3 +106,23 @@ export async function getLeaderboard() {
         throw error;
     }
 }
+
+/**
+ * 用户登录（或注册）以获取固定队伍
+ * @param {string} anonymousId
+ * @param {string} publicKey
+ * @param {string} userLevel
+ */
+export async function loginUser(anonymousId, publicKey, userLevel='medium') {
+    try {
+        const response = await apiClient.post('/api/user/login', {
+            anonymous_id: anonymousId,
+            public_key: publicKey,
+            user_level: userLevel
+        });
+        return response.data;
+    } catch (error) {
+        console.error('用户登录失败:', error);
+        throw error;
+    }
+}

@@ -13,7 +13,13 @@ class RingService:
     ]
 
     @staticmethod
-    def generate_ring(db: Session, user_public_key: str, user_level: str = "medium", ring_size: int = 5) -> dict:
+    def pick_group_for_user() -> str:
+        """为用户选择一个稳定的群组名称（简单随机，可扩展为按负载均衡）。"""
+        import random
+        return random.choice(RingService.GROUP_NAMES)
+
+    @staticmethod
+    def generate_ring(db: Session, user_public_key: str, user_level: str = "medium", group_name: str = None, ring_size: int = 5) -> dict:
         other_users = db.query(User).filter(
             User.user_level == user_level,
             User.public_key != user_public_key
@@ -28,7 +34,8 @@ class RingService:
 
         random.shuffle(public_keys)
         ring_id = CryptoService.generate_ring_id()
-        group_name = random.choice(RingService.GROUP_NAMES)
+        # 若传入 group_name 则使用，否则随机（兼容旧逻辑）
+        group_name = group_name or random.choice(RingService.GROUP_NAMES)
 
         ring = Ring(
             ring_id=ring_id,

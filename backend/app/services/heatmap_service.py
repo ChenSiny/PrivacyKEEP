@@ -33,12 +33,21 @@ class HeatmapService:
             })
         # 若尚无真实数据，返回一组预置演示点（不会覆盖已有数据）
         if not heatmap_data:
+            # 构造以北京近似坐标为中心的 10x10 区块演示数据，使用相对小坐标避免过大索引导致前端映射异常
+            base_lat_idx = int(39.9042 / 0.001)
+            base_lng_idx = int(116.4074 / 0.001)
             demo = []
-            # 构造 5x5 网格中若干热点区块
-            for i in range(5):
-                for j in range(5):
-                    weight = max(0, 10 - (abs(2-i) + abs(2-j))*2) + (i*j)%3
-                    if weight <= 0: continue
-                    demo.append({ 'x': 100000 + i, 'y': 100000 + j, 'weight': weight })
+            size = 10
+            for dx in range(size):
+                for dy in range(size):
+                    dist_center = abs(dx - size//2) + abs(dy - size//2)
+                    weight = max(0, 12 - dist_center * 2) + ((dx*dy) % 4)
+                    if weight <= 0:
+                        continue
+                    demo.append({
+                        'x': base_lng_idx + dx,
+                        'y': base_lat_idx + dy,
+                        'weight': float(weight)
+                    })
             return demo
         return heatmap_data

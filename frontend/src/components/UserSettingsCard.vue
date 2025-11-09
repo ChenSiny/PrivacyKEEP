@@ -13,6 +13,16 @@
         />
       </div>
       <div class="setting-item">
+        <label>所在队伍</label>
+        <div class="group-display" :class="{ placeholder: !groupName }">
+          {{ groupName || '未加入' }}
+        </div>
+        <div class="group-actions">
+          <button class="btn-assign" @click="$emit('assign-group')">群组分配</button>
+          <button class="btn-login" @click="$emit('login')">登录</button>
+        </div>
+      </div>
+      <div class="setting-item">
         <label>当前运动水平</label>
         <select
           :value="userLevel"
@@ -33,7 +43,8 @@ export default {
   name: 'UserSettingsCard',
   props: {
     anonymousId: { type: String, default: '' },
-    userLevel: { type: String, default: 'medium' }
+    userLevel: { type: String, default: 'medium' },
+    groupName: { type: String, default: '' }
   }
 }
 </script>
@@ -76,4 +87,38 @@ export default {
   outline: none;
   border-color: #3498db;
 }
+.group-display {
+  padding: 0.5rem;
+  border: 2px dashed #ecf0f1;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  background: #fafafa;
+  color: #2c3e50;
+}
+.group-display.placeholder {
+  color: #9ca3af;
+  font-style: italic;
+}
+.group-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+.btn-assign {
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #3498db;
+  background: #ecf5ff;
+  color: #3498db;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.btn-assign:hover { background: #d9ecff; }
+.btn-login {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #2ecc71;
+  background: #eafff1;
+  color: #2ecc71;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.btn-login:hover { background: #defbe6; }
 </style>
