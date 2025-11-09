@@ -60,12 +60,16 @@ export default {
 .user-settings-card h3 {
   margin: 0 0 0.75rem;
   color: #2c3e50;
-  font-size: 1rem;
+  /*font-size: 1rem; */
+  position: relative;
+  height: 50px;
+  top: 70px
 }
 .user-settings {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.75rem 1rem;
+  margin-left: 10%;
 }
 .setting-item {
   display: flex;

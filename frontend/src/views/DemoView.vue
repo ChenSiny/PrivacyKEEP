@@ -456,6 +456,7 @@ export default {
 .status-item {
   flex: 1;
   display: flex;
+  height: 210px;
 }
 .data-cards { margin-top: 1rem; }
 
@@ -489,6 +490,7 @@ export default {
 .leaderboard-view { display: none; }
 .leaderboard-inline {
   position: absolute;
+  z-index: 1000;
   top: 0;
   right: 0;
   bottom: 0;

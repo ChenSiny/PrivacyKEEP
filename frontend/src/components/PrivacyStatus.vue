@@ -81,6 +81,7 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  margin-left: 10%;
 }
 
 .status-item {

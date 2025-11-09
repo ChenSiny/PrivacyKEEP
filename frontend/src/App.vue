@@ -61,6 +61,7 @@ body {
 }
 
 .app-footer {
+  z-index: -1;
   background: rgba(44, 62, 80, 0.9);
   color: white;
   text-align: center;
