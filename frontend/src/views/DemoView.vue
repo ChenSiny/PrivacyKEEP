@@ -297,20 +297,22 @@ export default {
           this.workoutStats.totalDistance,
           this.workoutStats.averagePace
         );
-        const ringSignature = await ringSign(
-          ringMsg,
-          this.userKeyPair.privateKey,
-          this.currentRing.ring_public_keys || []
-        );
+        let usedRingSignature = false;
         try {
+          const ringSignature = await ringSign(
+            ringMsg,
+            this.userKeyPair.privateKey,
+            this.currentRing.ring_public_keys || []
+          );
           await submitScoreRing(
             this.currentRing.ring_id,
             this.workoutStats.totalDistance,
             this.workoutStats.averagePace,
             ringSignature
           );
+          usedRingSignature = true;
         } catch (e) {
-          console.warn('环签名提交失败，回退到群密钥HMAC流程', e);
+          console.warn('环签名生成或提交失败，回退到群密钥HMAC流程', e);
           // 回退：使用群密钥 HMAC
           const grp = this.currentRing;
           if (grp?.group_key && grp?.group_name) {
@@ -338,11 +340,12 @@ export default {
         this.dataUploaded = true;
         
         // 显示成功消息
+        const successGroupName = this.currentRing?.group_name || '未知群组';
         this.$emit('show-message', {
           type: 'success',
-          text: `运动数据上传成功！您已加入 ${grp.group_name}`
+          text: `运动数据上传成功！您已加入 ${successGroupName}`
         });
-        this._showToast('success', `运动数据上传成功！您已加入 ${grp.group_name}`);
+        this._showToast('success', `运动数据上传成功！您已加入 ${successGroupName}`);
         
       } catch (error) {
         console.error('运动数据处理失败:', error);
@@ -456,7 +459,7 @@ export default {
 .status-item {
   flex: 1;
   display: flex;
-  height: 210px;
+  height: 160px;
 }
 .data-cards { margin-top: 1rem; }
 

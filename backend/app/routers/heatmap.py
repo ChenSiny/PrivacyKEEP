@@ -40,7 +40,7 @@ async def upload_heatmap_data(
         raise HTTPException(status_code=500, detail=f"热力图数据上传失败: {str(e)}")
 
 @router.get("/", response_model=dict)
-async def get_heatmap(db: Session = Depends(get_db)):
+async def get_heatmap(db: Session = Depends(get_db), attenuate: bool = True, factor: float = 0.7, radius: int = 5):
     """获取全局聚合热力图。
 
     后端对同一区块的权重求和，不反推任何单个用户轨迹。
@@ -53,9 +53,11 @@ async def get_heatmap(db: Session = Depends(get_db)):
     """
     try:
         aggregated = HeatmapService.get_global_heatmap(db)
+        if attenuate:
+            aggregated = HeatmapService.attenuate_center(aggregated, factor=factor, radius=radius)
         return {
             "heatmap": aggregated,
-            "description": "全局热力图数据，已通过差分隐私保护"
+            "description": "全局热力图数据，已通过差分隐私保护" + ("（中心已衰减显示）" if attenuate else "")
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取热力图失败: {str(e)}")

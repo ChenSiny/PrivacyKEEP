@@ -7,9 +7,13 @@ import * as secp from '@noble/secp256k1';
 
 // =============== 工具函数 ===============
 function hexToBytes(hex) {
-    if (hex.length % 2 !== 0) throw new Error('Invalid hex');
-    const out = new Uint8Array(hex.length/2);
-    for (let i=0;i<hex.length;i+=2) out[i/2] = parseInt(hex.slice(i,i+2),16);
+    if (typeof hex !== 'string') throw new Error('Invalid hex');
+    // 兼容 0x 前缀与奇数长度
+    if (hex.startsWith('0x') || hex.startsWith('0X')) hex = hex.slice(2);
+    if (hex.length % 2 !== 0) hex = '0' + hex;
+    if (!/^[0-9a-fA-F]*$/.test(hex)) throw new Error('Invalid hex');
+    const out = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < hex.length; i += 2) out[i / 2] = parseInt(hex.slice(i, i + 2), 16);
     return out;
 }
 function bytesToHex(bytes){ return Array.from(bytes).map(b=>b.toString(16).padStart(2,'0')).join(''); }
@@ -81,13 +85,22 @@ export function prepareSignatureMessage(ringId, totalDistance, averagePace) {
  * 返回 { c0, s[] }
  */
 export async function ringSign(message, privHex, ringPublicKeys){
-    if (ringPublicKeys.length < 2) throw new Error('环大小至少为2');
+    if (!Array.isArray(ringPublicKeys)) throw new Error('环公钥无效');
     const ORDER = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141');
     const privBytes = hexToBytes(privHex);
     const myPubHex = bytesToHex(secp.getPublicKey(privBytes, true));
-    let pubs = [...ringPublicKeys];
+    // 规范化环公钥：去掉 0x 前缀、过滤非法、公钥大小需可被解析
+    let pubs = ringPublicKeys
+        .filter(Boolean)
+        .map(pk => (typeof pk === 'string' && (pk.startsWith('0x')||pk.startsWith('0X')) ? pk.slice(2) : pk))
+        .filter(pk => {
+            try { secp.Point.fromHex(hexToBytes(pk)); return true; } catch { return false; }
+        });
+    if (pubs.length < 1) pubs = [];
+    // 确保包含自己
     let idx = pubs.indexOf(myPubHex);
     if (idx === -1){ pubs.push(myPubHex); idx = pubs.length -1; }
+    if (pubs.length < 2) throw new Error('环大小至少为2');
     const n = pubs.length;
     // start index
     const start = (idx + 1) % n;

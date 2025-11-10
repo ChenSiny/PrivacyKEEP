@@ -13,24 +13,44 @@ try:
 except Exception:  # pragma: no cover - 环境缺少本地依赖时的降级路径
     coincurve = None
 
+# 次级可选依赖：ecdsa 作为备用生成有效 secp256k1 公私钥
+try:
+    import ecdsa  # type: ignore
+except Exception:
+    ecdsa = None
+
 class CryptoService:
     """简化的环签名密码学服务（演示用）。"""
 
     @staticmethod
     def generate_keypair():
-        if coincurve is None:
-            # 降级：生成伪随机的十六进制字符串，满足演示需要
-            ts = str(int(time.time() * 1000))
-            fake_priv = hashlib.sha256((ts + "priv").encode()).hexdigest()
-            fake_pub = hashlib.sha256((ts + "pub").encode()).hexdigest()
-            return {'private_key': fake_priv, 'public_key': fake_pub}
-        else:
+        if coincurve is not None:
             private_key = coincurve.PrivateKey()
             public_key = private_key.public_key
             return {
                 'private_key': private_key.secret.hex(),
                 'public_key': public_key.format(compressed=True).hex()
             }
+        # Fallback: 使用 ecdsa 生成有效 secp256k1 公私钥（压缩公钥）
+        if ecdsa is not None:
+            sk = ecdsa.SigningKey.generate(curve=ecdsa.SECP256k1)
+            vk = sk.get_verifying_key()
+            # 构造压缩公钥：前缀 0x02/0x03 + x
+            x_int = int.from_bytes(vk.pubkey.point.x().to_bytes(32, 'big'), 'big')
+            y_int = int(vk.pubkey.point.y())
+            prefix = b'\x03' if (y_int & 1) else b'\x02'
+            pub_compressed = prefix + x_int.to_bytes(32, 'big')
+            return {
+                'private_key': sk.to_string().hex(),
+                'public_key': pub_compressed.hex()
+            }
+        # 最差降级：保持旧行为，但注意这些公钥不一定可用于曲线验证
+        ts = str(int(time.time() * 1000))
+        fake_priv = hashlib.sha256((ts + "priv").encode()).hexdigest()
+        # 用 02 前缀 + 随机 32 字节确保形式上像压缩公钥，但可能不在曲线上
+        fake_x = hashlib.sha256((ts + "x").encode()).digest()
+        fake_pub = (b'\x02' + fake_x).hex()
+        return {'private_key': fake_priv, 'public_key': fake_pub}
 
     @staticmethod
     def simulate_ring_signature(message: str, private_key_hex: str, public_keys: List[str]) -> str:

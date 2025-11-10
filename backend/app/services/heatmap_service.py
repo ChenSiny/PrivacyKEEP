@@ -51,3 +51,38 @@ class HeatmapService:
                     })
             return demo
         return heatmap_data
+
+    @staticmethod
+    def attenuate_center(heatmap_data: list, factor: float = 0.7, radius: int = 5) -> list:
+        """对热力图中心区域做衰减（不修改数据库，仅在返回前调整）。
+
+        计算加权质心作为“中心点”，将欧式距离不超过 radius 的格子权重乘以 factor。
+
+        Args:
+            heatmap_data: 形如 [{'x': int, 'y': int, 'weight': float}, ...]
+            factor: 衰减系数，0~1
+            radius: 作用半径，格子单位
+        Returns:
+            新列表（浅拷贝），不会修改入参对象。
+        """
+        if not heatmap_data:
+            return []
+        try:
+            total_w = sum(max(0.0, float(item.get('weight', 0.0))) for item in heatmap_data)
+            if total_w <= 0:
+                return list(heatmap_data)
+            cx = sum(item['x'] * float(item['weight']) for item in heatmap_data) / total_w
+            cy = sum(item['y'] * float(item['weight']) for item in heatmap_data) / total_w
+            r2 = float(radius) * float(radius)
+            f = min(max(float(factor), 0.0), 1.0)
+            out = []
+            for item in heatmap_data:
+                x, y, w = int(item['x']), int(item['y']), float(item['weight'])
+                dx, dy = x - cx, y - cy
+                if (dx*dx + dy*dy) <= r2:
+                    w = w * f
+                out.append({'x': x, 'y': y, 'weight': float(w)})
+            return out
+        except Exception:
+            # 发生异常则不做衰减，原样返回
+            return list(heatmap_data)
